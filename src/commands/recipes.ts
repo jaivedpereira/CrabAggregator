@@ -1,19 +1,47 @@
 import chalk from "chalk";
 import { RecipeManager } from "../core/RecipeManager.js";
-import { banner, tag } from "../utils/ui.js";
+import { carregarConfig } from "../core/ConfigStore.js";
+import { logo, faixa, etiqueta, tabela } from "../utils/ui.js";
 
-/** `crab recipes` — list all discovered recipes and their status. */
-export async function runRecipes(): Promise<void> {
-  console.log(banner("CrabAggregator · Recipes"));
+/** `crab receitas` — lista todas as receitas descobertas e seu status. */
+export async function executarReceitas(): Promise<void> {
+  console.log(logo());
+  console.log("\n" + faixa("Receitas"));
+
   const manager = new RecipeManager();
-  await manager.load();
-  const all = manager.all();
-  if (all.length === 0) {
-    console.log(chalk.yellow("No recipes found in src/recipes (or dist/recipes)."));
+  await manager.carregar();
+  const todas = manager.all();
+  if (todas.length === 0) {
+    console.log(
+      chalk.yellow("Nenhuma receita encontrada em src/recipes (ou dist/recipes)."),
+    );
     return;
   }
-  for (const r of all) {
-    const status = r.enabled === false ? tag("off", "danger") : tag("on");
-    console.log(`${status} ${chalk.bold(r.name)} ${chalk.gray(`· ${r.type}`)}${r.label ? chalk.gray(` · ${r.label}`) : ""}`);
-  }
+
+  const cfg = await carregarConfig();
+  const desabilitadas = new Set(cfg.receitasDesabilitadas ?? []);
+
+  const linhas = todas.map((r) => {
+    const ativa = r.enabled !== false && !desabilitadas.has(r.name);
+    const status = ativa ? etiqueta("ativa", "sucesso") : etiqueta("off", "perigo");
+    return [status, r.name, r.type, r.label ?? "—"];
+  });
+
+  console.log(
+    tabela(
+      [
+        { titulo: "Status", largura: 8 },
+        { titulo: "Nome", largura: 18 },
+        { titulo: "Tipo", largura: 8 },
+        { titulo: "Rótulo", largura: 34 },
+      ],
+      linhas,
+    ),
+  );
+  console.log(
+    "\n" +
+      chalk.gray(
+        `Total: ${todas.length} · ligue/desligue com "crab config" → Ligar / desligar receitas`,
+      ),
+  );
 }

@@ -3,118 +3,175 @@ import chalk from "chalk";
 import { RecipeManager } from "../core/RecipeManager.js";
 import { SearchEngine } from "../core/SearchEngine.js";
 import { DownloadManager } from "../core/DownloadManager.js";
-import { loadConfig } from "../core/ConfigStore.js";
-import { banner, renderMediaRow, renderMediaDetail, tag, errorBox, successBox } from "../utils/ui.js";
-import { openExternally, playWithMpv } from "../utils/termux.js";
+import { carregarConfig } from "../core/ConfigStore.js";
+import { FavoritesStore } from "../core/FavoritesStore.js";
+import { HistoryStore } from "../core/HistoryStore.js";
+import {
+  logo,
+  faixa,
+  etiqueta,
+  caixaErro,
+  caixaInfo,
+  caixaSucesso,
+  renderLinhaMidia,
+  renderDetalheMidia,
+  barraProgresso,
+  imprimirProgresso,
+  finalizarLinhaProgresso,
+  divisor,
+} from "../utils/ui.js";
+import { abrirExterno, reproduzirComMpv } from "../utils/termux.js";
 import type { MediaObject } from "../types/index.js";
 
-export interface SearchCommandOpts {
-  only?: string[];
+export interface OpcoesBuscaCmd {
+  somente?: string[];
   json?: boolean;
 }
 
-export async function runSearch(query: string | undefined, opts: SearchCommandOpts = {}): Promise<void> {
-  console.log(banner("CrabAggregator · Search"));
+export async function executarBusca(
+  consulta: string | undefined,
+  opts: OpcoesBuscaCmd = {},
+): Promise<void> {
+  console.log(logo());
+  console.log("\n" + faixa("Busca"));
 
   const manager = new RecipeManager();
-  await manager.load();
+  await manager.carregar();
   if (manager.active().length === 0) {
-    console.log(errorBox("No active recipes found. Drop a Recipe into src/recipes/."));
+    console.log(
+      caixaErro(
+        "Nenhuma receita ativa encontrada. Coloque uma Receita em src/recipes/.",
+      ),
+    );
     return;
   }
 
-  let term = query;
-  if (!term) {
-    const answer = await p.text({ message: "What are you looking for?", placeholder: "e.g. dune frank herbert" });
-    if (p.isCancel(answer) || !answer) return;
-    term = String(answer);
+  let termo = consulta;
+  if (!termo) {
+    const resposta = await p.text({
+      message: "O que você está procurando?",
+      placeholder: "ex: daft punk, dom casmurro, one piece",
+    });
+    if (p.isCancel(resposta) || !resposta) return;
+    termo = String(resposta);
   }
 
-  const config = await loadConfig();
+  const config = await carregarConfig();
   const engine = new SearchEngine(manager, config);
+  const favoritos = new FavoritesStore();
+  const historico = new HistoryStore();
 
   const spinner = p.spinner();
-  spinner.start(`Querying ${manager.active().length} recipe(s)...`);
-  const slices = await engine.search(term, { only: opts.only });
-  spinner.stop("Results ready.");
+  spinner.start(`Consultando ${manager.active().length} receita(s)…`);
+  const fatias = await engine.buscar(termo, { somente: opts.somente });
+  spinner.stop("Resultados prontos.");
 
   if (opts.json) {
-    console.log(JSON.stringify(slices, null, 2));
+    console.log(JSON.stringify(fatias, null, 2));
     return;
   }
 
-  const flat: MediaObject[] = [];
-  for (const slice of slices) {
-    if (slice.error) {
-      console.log(errorBox(`[${slice.recipe}] ${slice.error}`));
+  const plano: MediaObject[] = [];
+  for (const fatia of fatias) {
+    if (fatia.erro) {
+      console.log(caixaErro(`[${fatia.receita}] ${fatia.erro}`));
       continue;
     }
-    if (slice.items.length === 0) {
-      console.log(`${tag(slice.recipe, "muted")} ${chalk.gray("no results")}`);
+    if (fatia.itens.length === 0) {
+      console.log(`${etiqueta(fatia.receita, "discreto")} ${chalk.gray("sem resultados")}`);
       continue;
     }
-    console.log(`\n${tag(slice.recipe)} ${chalk.white(`${slice.items.length} result(s)`)}`);
-    for (const item of slice.items) {
-      flat.push(item);
-      console.log("  " + renderMediaRow(item, flat.length - 1));
+    console.log(
+      "\n" +
+        etiqueta(fatia.receita) +
+        " " +
+        chalk.white(`${fatia.itens.length} resultado(s)`),
+    );
+    for (const item of fatia.itens) {
+      plano.push(item);
+      console.log("  " + renderLinhaMidia(item, plano.length - 1));
     }
   }
 
-  if (flat.length === 0) {
-    console.log("\n" + errorBox("No results across all recipes."));
+  // Registra no histórico independentemente de ter havido seleção.
+  await historico.registrar(termo, plano.length);
+
+  if (plano.length === 0) {
+    console.log("\n" + caixaInfo("Nenhum resultado em nenhuma das receitas."));
     return;
   }
 
-  const pick = await p.select({
-    message: "Select a result:",
-    options: flat.map((item, i) => ({
+  const escolha = await p.select({
+    message: "Escolha um resultado:",
+    options: plano.map((item, i) => ({
       value: i,
       label: `${String(i + 1).padStart(2, "0")} · ${item.title}`,
       hint: item.source,
     })),
   });
-  if (p.isCancel(pick)) return;
+  if (p.isCancel(escolha)) return;
 
-  const chosen = flat[Number(pick)]!;
-  console.log("\n" + renderMediaDetail(chosen));
+  const escolhido = plano[Number(escolha)]!;
+  console.log("\n" + renderDetalheMidia(escolhido));
+  console.log(divisor());
 
-  const action = await p.select({
-    message: "What now?",
+  const jaFavorito = await favoritos.contem(escolhido);
+  const acao = await p.select({
+    message: "O que deseja fazer?",
     options: [
-      ...(chosen.streamUrl ? [{ value: "play", label: "Play with mpv" }] : []),
-      ...(chosen.downloadUrl ? [{ value: "download", label: "Download" }] : []),
-      ...(chosen.thumbnail ? [{ value: "cover", label: "Open cover externally" }] : []),
-      { value: "exit", label: "Exit" },
+      ...(escolhido.streamUrl ? [{ value: "reproduzir", label: "Reproduzir com mpv" }] : []),
+      ...(escolhido.downloadUrl ? [{ value: "baixar", label: "Baixar" }] : []),
+      ...(escolhido.thumbnail ? [{ value: "capa", label: "Abrir capa externamente" }] : []),
+      {
+        value: "favoritar",
+        label: jaFavorito ? "Remover dos favoritos" : "Adicionar aos favoritos",
+      },
+      { value: "sair", label: "Sair" },
     ],
   });
-  if (p.isCancel(action) || action === "exit") return;
+  if (p.isCancel(acao) || acao === "sair") return;
 
-  if (action === "play" && chosen.streamUrl) {
+  if (acao === "reproduzir" && escolhido.streamUrl) {
     try {
-      playWithMpv(chosen.streamUrl, { audioOnly: chosen.type === "music" });
+      reproduzirComMpv(escolhido.streamUrl, { audioOnly: escolhido.type === "music" });
     } catch (err) {
-      console.log(errorBox((err as Error).message));
+      console.log(caixaErro((err as Error).message));
     }
-  } else if (action === "download" && chosen.downloadUrl) {
+  } else if (acao === "baixar" && escolhido.downloadUrl) {
     const dl = new DownloadManager(config, (prog) => {
-      if (prog.percent != null) {
-        process.stdout.write(`\r${tag("downloading")} ${prog.percent}%   `);
+      if (prog.percentual != null) {
+        imprimirProgresso(
+          barraProgresso(prog.percentual, 30, {
+            recebido: prog.bytesRecebidos,
+            total: prog.bytesTotais,
+            rotulo: escolhido.title,
+          }),
+        );
       }
     });
-    dl.enqueue({ item: chosen });
+    dl.enfileirar({ item: escolhido });
     try {
-      const [dest] = await dl.run();
-      process.stdout.write("\n");
-      console.log(successBox(`Saved to ${dest}`));
+      const [destino] = await dl.executar();
+      finalizarLinhaProgresso();
+      console.log(caixaSucesso(`Salvo em ${destino}`));
     } catch (err) {
-      process.stdout.write("\n");
-      console.log(errorBox((err as Error).message));
+      finalizarLinhaProgresso();
+      console.log(caixaErro((err as Error).message));
     }
-  } else if (action === "cover" && chosen.thumbnail) {
+  } else if (acao === "capa" && escolhido.thumbnail) {
     try {
-      openExternally(chosen.thumbnail);
+      abrirExterno(escolhido.thumbnail);
+      console.log(caixaSucesso("Capa enviada ao visualizador padrão do sistema."));
     } catch (err) {
-      console.log(errorBox((err as Error).message));
+      console.log(caixaErro((err as Error).message));
+    }
+  } else if (acao === "favoritar") {
+    if (jaFavorito) {
+      await favoritos.remover(escolhido);
+      console.log(caixaInfo("Removido dos favoritos."));
+    } else {
+      await favoritos.adicionar(escolhido);
+      console.log(caixaSucesso("Adicionado aos favoritos ★"));
     }
   }
 }

@@ -1,53 +1,91 @@
 import * as p from "@clack/prompts";
-import { loadConfig, saveConfig, getConfigPath } from "../core/ConfigStore.js";
-import { banner, successBox, tag } from "../utils/ui.js";
 import chalk from "chalk";
+import { carregarConfig, salvarConfig, caminhoConfig } from "../core/ConfigStore.js";
+import { RecipeManager } from "../core/RecipeManager.js";
+import { logo, faixa, etiqueta, caixaSucesso, caixaInfo } from "../utils/ui.js";
 
 /**
- * Interactive config editor. Lets the user tweak the download path
- * and manage named API keys persisted at ~/.crabrc.json.
+ * Editor interativo de configuração. Permite trocar o caminho de
+ * downloads, gerenciar chaves de API e ligar/desligar receitas. Tudo
+ * persistido em ~/.crabrc.json.
  */
-export async function runConfig(): Promise<void> {
-  console.log(banner("CrabAggregator · Config"));
-  console.log(`${tag("file", "muted")} ${chalk.cyan(getConfigPath())}\n`);
+export async function executarConfig(): Promise<void> {
+  console.log(logo());
+  console.log("\n" + faixa("Configuração"));
+  console.log(`${etiqueta("arquivo", "discreto")} ${chalk.cyan(caminhoConfig())}\n`);
 
-  const cfg = await loadConfig();
+  const cfg = await carregarConfig();
 
-  const action = await p.select({
-    message: "What do you want to configure?",
+  const acao = await p.select({
+    message: "O que você quer configurar?",
     options: [
-      { value: "downloadPath", label: `Download path (current: ${cfg.downloadPath})` },
-      { value: "apiKey", label: "Add / update an API key" },
-      { value: "show", label: "Show current config" },
-      { value: "exit", label: "Exit" },
+      { value: "downloadPath", label: `Pasta de downloads (atual: ${cfg.downloadPath})` },
+      { value: "apiKey", label: "Adicionar / atualizar uma chave de API" },
+      { value: "receitas", label: "Ligar / desligar receitas" },
+      { value: "mostrar", label: "Mostrar configuração completa" },
+      { value: "sair", label: "Sair" },
     ],
   });
-  if (p.isCancel(action) || action === "exit") return;
+  if (p.isCancel(acao) || acao === "sair") return;
 
-  if (action === "downloadPath") {
-    const next = await p.text({
-      message: "New download path:",
+  if (acao === "downloadPath") {
+    const nova = await p.text({
+      message: "Nova pasta de downloads:",
       initialValue: cfg.downloadPath,
     });
-    if (p.isCancel(next)) return;
-    cfg.downloadPath = String(next);
-    await saveConfig(cfg);
-    console.log(successBox(`downloadPath set to ${cfg.downloadPath}`));
+    if (p.isCancel(nova)) return;
+    cfg.downloadPath = String(nova);
+    await salvarConfig(cfg);
+    console.log(caixaSucesso(`Pasta de downloads definida como ${cfg.downloadPath}`));
     return;
   }
 
-  if (action === "apiKey") {
-    const name = await p.text({ message: "API key name (e.g. youtube, tmdb):" });
-    if (p.isCancel(name) || !name) return;
-    const value = await p.password({ message: `Value for "${String(name)}":` });
-    if (p.isCancel(value)) return;
-    cfg.apiKeys[String(name)] = String(value);
-    await saveConfig(cfg);
-    console.log(successBox(`Saved apiKeys.${String(name)}`));
+  if (acao === "apiKey") {
+    const nome = await p.text({
+      message: "Nome da chave (ex: youtube, tmdb):",
+    });
+    if (p.isCancel(nome) || !nome) return;
+    const valor = await p.password({ message: `Valor para "${String(nome)}":` });
+    if (p.isCancel(valor)) return;
+    cfg.apiKeys[String(nome)] = String(valor);
+    await salvarConfig(cfg);
+    console.log(caixaSucesso(`Chave apiKeys.${String(nome)} salva.`));
     return;
   }
 
-  if (action === "show") {
+  if (acao === "receitas") {
+    const manager = new RecipeManager();
+    await manager.carregar();
+    const todas = manager.all();
+    if (todas.length === 0) {
+      console.log(caixaInfo("Nenhuma receita encontrada."));
+      return;
+    }
+    const desabilitadas = new Set(cfg.receitasDesabilitadas ?? []);
+    const marcadas = await p.multiselect({
+      message: "Marque as receitas que devem ficar ATIVAS:",
+      initialValues: todas.filter((r) => !desabilitadas.has(r.name)).map((r) => r.name),
+      options: todas.map((r) => ({
+        value: r.name,
+        label: `${r.label ?? r.name} (${r.type})`,
+      })),
+      required: false,
+    });
+    if (p.isCancel(marcadas)) return;
+    const ativas = new Set(marcadas as string[]);
+    cfg.receitasDesabilitadas = todas
+      .map((r) => r.name)
+      .filter((n) => !ativas.has(n));
+    await salvarConfig(cfg);
+    console.log(
+      caixaSucesso(
+        `${ativas.size} receita(s) ativa(s), ${cfg.receitasDesabilitadas.length} desligada(s).`,
+      ),
+    );
+    return;
+  }
+
+  if (acao === "mostrar") {
     console.log(chalk.white(JSON.stringify(cfg, null, 2)));
   }
 }

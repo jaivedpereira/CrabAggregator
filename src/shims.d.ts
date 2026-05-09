@@ -1,9 +1,9 @@
-// Minimal ambient shims so `tsc --noEmit` can succeed in environments
-// where the full dep tree (incl. @types/node) isn't installed. When the
-// project is installed normally via `npm install`, the real type
-// definitions override these and this file becomes a harmless no-op.
+// Shims mínimos para que o `tsc --noEmit` funcione em ambientes onde o
+// registro npm não está acessível. Quando o projeto é instalado
+// normalmente via `npm install`, as declarações reais de tipos têm
+// prioridade e estes shims ficam inertes.
 
-// ---- Node built-in modules ---------------------------------------------
+// ---- Módulos built-in do Node -------------------------------------------
 
 declare module "node:fs" {
   export const promises: {
@@ -43,7 +43,7 @@ declare module "node:child_process" {
   export function spawnSync(cmd: string, args?: string[], opts?: any): { status: number | null };
 }
 
-// ---- Globals -----------------------------------------------------------
+// ---- Globais ------------------------------------------------------------
 
 interface ImportMeta {
   url: string;
@@ -75,7 +75,18 @@ declare class Buffer extends Uint8Array {
   toString(encoding?: string): string;
 }
 
-// ---- Third-party packages ---------------------------------------------
+declare class Date {
+  constructor();
+  constructor(value: string | number);
+  toISOString(): string;
+  getFullYear(): number;
+  getMonth(): number;
+  getDate(): number;
+  getHours(): number;
+  getMinutes(): number;
+}
+
+// ---- Pacotes de terceiros ----------------------------------------------
 
 declare module "chalk" {
   type Chainable = ((text: string) => string) & { [k: string]: Chainable };
@@ -104,7 +115,8 @@ declare module "commander" {
     name(n: string): this;
     description(d: string): this;
     version(v: string): this;
-    command(s: string): this;
+    command(s: string, opts?: { isDefault?: boolean }): this;
+    alias(a: string): this;
     option(flag: string, desc: string, def?: unknown): this;
     action(fn: (...args: any[]) => any): this;
     parseAsync(argv: string[]): Promise<this>;
@@ -112,12 +124,23 @@ declare module "commander" {
 }
 
 declare module "@clack/prompts" {
-  export function text(o: { message: string; placeholder?: string; initialValue?: string }): Promise<string | symbol>;
+  export function text(o: {
+    message: string;
+    placeholder?: string;
+    initialValue?: string;
+  }): Promise<string | symbol>;
   export function password(o: { message: string }): Promise<string | symbol>;
+  export function confirm(o: { message: string }): Promise<boolean | symbol>;
   export function select<T = string>(o: {
     message: string;
     options: Array<{ value: T; label: string; hint?: string }>;
   }): Promise<T | symbol>;
+  export function multiselect<T = string>(o: {
+    message: string;
+    options: Array<{ value: T; label: string; hint?: string }>;
+    initialValues?: T[];
+    required?: boolean;
+  }): Promise<T[] | symbol>;
   export function isCancel(v: unknown): v is symbol;
   export function spinner(): { start(msg?: string): void; stop(msg?: string): void };
 }

@@ -1,18 +1,24 @@
-import { playWithMpv } from "../utils/termux.js";
-import { banner, errorBox, successBox, tag } from "../utils/ui.js";
+import { reproduzirComMpv } from "../utils/termux.js";
+import { logo, faixa, etiqueta, caixaErro, caixaSucesso } from "../utils/ui.js";
 import chalk from "chalk";
 
-/** `crab play <url>` — stream a URL with mpv. */
-export async function runPlay(url: string, opts: { background?: boolean; audioOnly?: boolean } = {}): Promise<void> {
-  console.log(banner("CrabAggregator · Play"));
-  console.log(`${tag("url", "muted")} ${chalk.cyan(url)}`);
+/** `crab tocar <url>` — transmite uma URL usando o mpv. */
+export async function executarPlay(
+  url: string,
+  opts: { background?: boolean; audioOnly?: boolean } = {},
+): Promise<void> {
+  console.log(logo());
+  console.log("\n" + faixa("Reproduzir"));
+  console.log(`${etiqueta("url", "discreto")} ${chalk.cyan(url)}`);
   try {
-    const child = playWithMpv(url, opts);
+    const filho = reproduzirComMpv(url, opts);
     if (opts.background) {
-      console.log(successBox(`mpv started in background (pid ${child.pid}).`));
+      console.log(
+        caixaSucesso(`mpv iniciado em segundo plano (pid ${filho.pid}).`),
+      );
     }
   } catch (err) {
-    console.log(errorBox((err as Error).message));
+    console.log(caixaErro((err as Error).message));
     process.exitCode = 1;
   }
 }

@@ -1,53 +1,64 @@
 import { spawn, spawnSync } from "node:child_process";
 
 /**
- * Termux helpers — thin wrappers around external binaries. All functions
- * degrade gracefully when the tool isn't installed (common on desktop).
+ * Helpers do Termux — wrappers finos sobre binários externos. Todas as
+ * funções degradam graciosamente quando a ferramenta não está instalada
+ * (comum fora do Termux).
  */
 
-function hasBinary(name: string): boolean {
-  const which = spawnSync("which", [name], { stdio: "ignore" });
-  return which.status === 0;
+function temBinario(nome: string): boolean {
+  const r = spawnSync("which", [nome], { stdio: "ignore" });
+  return r.status === 0;
 }
 
 /**
- * Stream a URL via mpv. Returns the child process so the caller can
- * wire signals (Ctrl+C, etc.). Detaches for background playback when requested.
+ * Reproduz uma URL no mpv. Devolve o processo filho para que o chamador
+ * possa lidar com sinais (Ctrl+C etc.). Desanexa-se para tocar em
+ * segundo plano quando `background=true`.
  */
-export function playWithMpv(url: string, opts: { background?: boolean; audioOnly?: boolean } = {}) {
-  if (!hasBinary("mpv")) {
-    throw new Error("mpv is not installed. On Termux: pkg install mpv");
+export function reproduzirComMpv(
+  url: string,
+  opts: { background?: boolean; audioOnly?: boolean } = {},
+) {
+  if (!temBinario("mpv")) {
+    throw new Error("mpv não está instalado. No Termux use: pkg install mpv");
   }
   const args: string[] = [];
   if (opts.audioOnly) args.push("--no-video");
   args.push(url);
 
-  const child = spawn("mpv", args, {
+  const filho = spawn("mpv", args, {
     stdio: opts.background ? "ignore" : "inherit",
     detached: !!opts.background,
   });
-  if (opts.background) child.unref();
-  return child;
+  if (opts.background) filho.unref();
+  return filho;
 }
 
 /**
- * Open a URL/file with the system's default handler.
- * Uses `termux-open` on Termux, falls back to xdg-open / open.
+ * Abre uma URL/arquivo no aplicativo padrão do sistema.
+ * Prioriza `termux-open` (Termux), caindo para `xdg-open` (Linux) ou
+ * `open` (macOS).
  */
-export function openExternally(target: string): void {
-  const candidates = ["termux-open", "xdg-open", "open"];
-  for (const bin of candidates) {
-    if (hasBinary(bin)) {
-      spawn(bin, [target], { stdio: "ignore", detached: true }).unref();
+export function abrirExterno(alvo: string): void {
+  const candidatos = ["termux-open", "xdg-open", "open"];
+  for (const bin of candidatos) {
+    if (temBinario(bin)) {
+      spawn(bin, [alvo], { stdio: "ignore", detached: true }).unref();
       return;
     }
   }
-  throw new Error("No opener found (tried termux-open, xdg-open, open).");
+  throw new Error("Nenhum abridor encontrado (tentei termux-open, xdg-open, open).");
 }
 
-/** Whether we're running inside Termux. */
-export function isTermux(): boolean {
-  return !!process.env.PREFIX?.includes("com.termux") || hasBinary("termux-open");
+/** Indica se estamos rodando dentro do Termux. */
+export function ehTermux(): boolean {
+  return !!process.env.PREFIX?.includes("com.termux") || temBinario("termux-open");
 }
 
-export { hasBinary };
+// Aliases em inglês para compatibilidade com qualquer código legado.
+export const playWithMpv = reproduzirComMpv;
+export const openExternally = abrirExterno;
+export const isTermux = ehTermux;
+
+export { temBinario };

@@ -5,142 +5,153 @@ import axios from "axios";
 import type { MediaObject } from "../types/index.js";
 import type { CrabConfig } from "./ConfigStore.js";
 
-export interface DownloadJob {
+export interface TrabalhoDownload {
   item: MediaObject;
-  /** Resolved download URL (falls back to item.downloadUrl / item.streamUrl). */
+  /** URL resolvida para download (cai para item.downloadUrl / streamUrl). */
   url?: string;
-  /** Optional override for destination filename. */
-  filename?: string;
+  /** Sobrescreve o nome do arquivo de destino. */
+  nomeArquivo?: string;
 }
 
-export interface DownloadProgress {
-  job: DownloadJob;
-  receivedBytes: number;
-  totalBytes?: number;
-  percent?: number;
+export interface ProgressoDownload {
+  trabalho: TrabalhoDownload;
+  bytesRecebidos: number;
+  bytesTotais?: number;
+  percentual?: number;
+  /** Velocidade média desde o início, em bytes/segundo. */
+  velocidade?: number;
+  /** Tempo estimado até finalizar, em segundos. */
+  etaSegundos?: number;
 }
 
-export type ProgressCallback = (p: DownloadProgress) => void;
+export type CallbackProgresso = (p: ProgressoDownload) => void;
 
 /**
- * DownloadManager — serial FIFO queue.
- * - Streams/video go through `yt-dlp` when available.
- * - Everything else uses axios streaming into the configured downloadPath.
+ * DownloadManager — fila FIFO serial.
+ * - Streams/vídeo usam `yt-dlp` quando disponível.
+ * - Demais casos usam axios em streaming para o `downloadPath` configurado.
  */
 export class DownloadManager {
-  private queue: DownloadJob[] = [];
-  private running = false;
+  private fila: TrabalhoDownload[] = [];
+  private rodando = false;
 
-  constructor(private config: CrabConfig, private onProgress?: ProgressCallback) {}
+  constructor(private config: CrabConfig, private aoProgredir?: CallbackProgresso) {}
 
-  enqueue(job: DownloadJob): void {
-    this.queue.push(job);
+  enfileirar(trabalho: TrabalhoDownload): void {
+    this.fila.push(trabalho);
   }
 
-  size(): number {
-    return this.queue.length;
+  tamanho(): number {
+    return this.fila.length;
   }
 
-  /** Drain the queue, returning resolved destination paths. */
-  async run(): Promise<string[]> {
-    if (this.running) throw new Error("DownloadManager is already running");
-    this.running = true;
-    const outputs: string[] = [];
+  /** Drena a fila e devolve os caminhos finais de cada download. */
+  async executar(): Promise<string[]> {
+    if (this.rodando) throw new Error("O DownloadManager já está em execução");
+    this.rodando = true;
+    const saidas: string[] = [];
     try {
       await fs.mkdir(this.config.downloadPath, { recursive: true });
-      while (this.queue.length) {
-        const job = this.queue.shift()!;
-        outputs.push(await this.process(job));
+      while (this.fila.length) {
+        const trabalho = this.fila.shift()!;
+        saidas.push(await this.processar(trabalho));
       }
     } finally {
-      this.running = false;
+      this.rodando = false;
     }
-    return outputs;
+    return saidas;
   }
 
-  private async process(job: DownloadJob): Promise<string> {
-    const url = job.url ?? job.item.downloadUrl ?? job.item.streamUrl;
-    if (!url) throw new Error(`No downloadable URL for "${job.item.title}"`);
+  private async processar(trabalho: TrabalhoDownload): Promise<string> {
+    const url = trabalho.url ?? trabalho.item.downloadUrl ?? trabalho.item.streamUrl;
+    if (!url) throw new Error(`Sem URL de download para "${trabalho.item.title}"`);
 
-    const useYtDlp = job.item.type === "video" || /youtube\.com|youtu\.be/.test(url);
-    if (useYtDlp) return this.ytDlp(job, url);
-    return this.httpStream(job, url);
+    const usaYtDlp = trabalho.item.type === "video" || /youtube\.com|youtu\.be/.test(url);
+    if (usaYtDlp) return this.ytDlp(trabalho, url);
+    return this.streamHttp(trabalho, url);
   }
 
-  private async httpStream(job: DownloadJob, url: string): Promise<string> {
-    const filename = job.filename ?? this.inferFilename(job, url);
-    const dest = path.join(this.config.downloadPath, filename);
+  private async streamHttp(trabalho: TrabalhoDownload, url: string): Promise<string> {
+    const nomeArquivo = trabalho.nomeArquivo ?? this.inferirNomeArquivo(trabalho, url);
+    const destino = path.join(this.config.downloadPath, nomeArquivo);
 
-    // responseType: "stream" makes data a Node Readable; axios types widen
-    // to any here which is fine for our streaming contract.
-    const res = await axios.get<any>(url, { responseType: "stream" });
-    const stream = res.data as {
+    const resp = await axios.get<any>(url, { responseType: "stream" });
+    const stream = resp.data as {
       on(ev: string, cb: (arg: any) => void): void;
       pipe(target: any): void;
     };
-    const total = Number(res.headers["content-length"]) || undefined;
-    let received = 0;
+    const total = Number(resp.headers["content-length"]) || undefined;
+    let recebido = 0;
+    const inicio = Date.now();
 
     await new Promise<void>((resolve, reject) => {
-      const writer = createWriteStream(dest);
+      const escritor = createWriteStream(destino);
       stream.on("data", (chunk: Buffer) => {
-        received += chunk.length;
-        this.onProgress?.({
-          job,
-          receivedBytes: received,
-          totalBytes: total,
-          percent: total ? Math.round((received / total) * 100) : undefined,
+        recebido += chunk.length;
+        const decorridoS = Math.max((Date.now() - inicio) / 1000, 0.001);
+        const velocidade = recebido / decorridoS;
+        const etaSegundos =
+          total && velocidade > 0 ? Math.max(0, (total - recebido) / velocidade) : undefined;
+        this.aoProgredir?.({
+          trabalho,
+          bytesRecebidos: recebido,
+          bytesTotais: total,
+          percentual: total ? Math.round((recebido / total) * 100) : undefined,
+          velocidade,
+          etaSegundos,
         });
       });
-      stream.pipe(writer);
+      stream.pipe(escritor);
       stream.on("error", reject);
-      writer.on("finish", () => resolve());
-      writer.on("error", reject);
+      escritor.on("finish", () => resolve());
+      escritor.on("error", reject);
     });
 
-    return dest;
+    return destino;
   }
 
-  private ytDlp(job: DownloadJob, url: string): Promise<string> {
+  private ytDlp(trabalho: TrabalhoDownload, url: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const outTemplate = path.join(this.config.downloadPath, "%(title)s.%(ext)s");
-      const child = spawn("yt-dlp", ["-o", outTemplate, "--newline", url], { stdio: ["ignore", "pipe", "pipe"] });
+      const template = path.join(this.config.downloadPath, "%(title)s.%(ext)s");
+      const filho = spawn("yt-dlp", ["-o", template, "--newline", url], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
 
-      let lastLine = "";
-      child.stdout.on("data", (b: Buffer) => {
-        const text = b.toString();
-        lastLine = text.trim().split("\n").pop() ?? lastLine;
-        // yt-dlp lines look like: "[download]  42.1% of ~12.34MiB at  1.23MiB/s ETA 00:05"
-        const m = /([0-9.]+)%/.exec(lastLine);
+      let ultimaLinha = "";
+      filho.stdout.on("data", (b: Buffer) => {
+        const texto = b.toString();
+        ultimaLinha = texto.trim().split("\n").pop() ?? ultimaLinha;
+        // Linhas do yt-dlp: "[download]  42.1% of ~12.34MiB at  1.23MiB/s ETA 00:05"
+        const m = /([0-9.]+)%/.exec(ultimaLinha);
         if (m) {
-          this.onProgress?.({
-            job,
-            receivedBytes: 0,
-            percent: Math.round(parseFloat(m[1]!)),
+          this.aoProgredir?.({
+            trabalho,
+            bytesRecebidos: 0,
+            percentual: Math.round(parseFloat(m[1]!)),
           });
         }
       });
 
-      child.on("error", (err: Error) => {
-        reject(new Error(`yt-dlp not available or failed: ${err.message}`));
+      filho.on("error", (err: Error) => {
+        reject(new Error(`yt-dlp indisponível ou falhou: ${err.message}`));
       });
-      child.on("close", (code: number | null) => {
-        if (code === 0) resolve(this.config.downloadPath);
-        else reject(new Error(`yt-dlp exited with code ${code}`));
+      filho.on("close", (codigo: number | null) => {
+        if (codigo === 0) resolve(this.config.downloadPath);
+        else reject(new Error(`yt-dlp encerrou com código ${codigo}`));
       });
     });
   }
 
-  private inferFilename(job: DownloadJob, url: string): string {
-    const fromUrl = path.basename(new URL(url).pathname) || "";
-    if (fromUrl && /\.[a-z0-9]{2,5}$/i.test(fromUrl)) return fromUrl;
-    const safeTitle = job.item.title.replace(/[^\w.\-]+/g, "_").slice(0, 120);
-    const ext = this.extForType(job.item.type);
-    return `${safeTitle}${ext}`;
+  private inferirNomeArquivo(trabalho: TrabalhoDownload, url: string): string {
+    const daUrl = path.basename(new URL(url).pathname) || "";
+    if (daUrl && /\.[a-z0-9]{2,5}$/i.test(daUrl)) return daUrl;
+    const tituloSeguro = trabalho.item.title.replace(/[^\w.\-]+/g, "_").slice(0, 120);
+    const ext = this.extensaoPorTipo(trabalho.item.type);
+    return `${tituloSeguro}${ext}`;
   }
 
-  private extForType(type: MediaObject["type"]): string {
-    switch (type) {
+  private extensaoPorTipo(tipo: MediaObject["type"]): string {
+    switch (tipo) {
       case "music":
         return ".mp3";
       case "video":
