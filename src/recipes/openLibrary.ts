@@ -2,13 +2,13 @@ import axios from "axios";
 import type { Recipe, MediaObject } from "../types/index.js";
 
 /**
- * Open Library Recipe
+ * Receita Open Library
  * ------------------------------------------------------------
- * Public API, no key required.
- * Search:   https://openlibrary.org/search.json?q=<term>&limit=10
- * Covers:   https://covers.openlibrary.org/b/id/<cover_i>-L.jpg
- * Editions: https://openlibrary.org/works/<key>/editions.json  (for IA ids)
- * Download: https://archive.org/download/<ia>/<ia>.pdf         (when available)
+ * API pública, sem chave.
+ * Busca:   https://openlibrary.org/search.json?q=<termo>&limit=10
+ * Capas:   https://covers.openlibrary.org/b/id/<cover_i>-L.jpg
+ * Edições: https://openlibrary.org/works/<key>/editions.json  (para IDs do IA)
+ * Download: https://archive.org/download/<ia>/<ia>.pdf         (quando disponível)
  */
 
 interface OLDoc {
@@ -23,34 +23,34 @@ interface OLDoc {
   subject?: string[];
 }
 
-interface OLResponse {
+interface OLResposta {
   docs: OLDoc[];
   numFound: number;
 }
 
-function coverUrl(id?: number): string | undefined {
+function urlCapa(id?: number): string | undefined {
   return id ? `https://covers.openlibrary.org/b/id/${id}-L.jpg` : undefined;
 }
 
-function pickArchiveId(doc: OLDoc): string | undefined {
+function pegarIdArchive(doc: OLDoc): string | undefined {
   return doc.ia && doc.ia.length > 0 ? doc.ia[0] : undefined;
 }
 
-const recipe: Recipe = {
+const receita: Recipe = {
   name: "open-library",
-  label: "Open Library (books)",
+  label: "Open Library (livros)",
   type: "book",
   display: "list",
   enabled: true,
 
-  async search(query, _ctx): Promise<MediaObject[]> {
-    const { data } = await axios.get<OLResponse>("https://openlibrary.org/search.json", {
-      params: { q: query, limit: 10 },
+  async search(consulta, _ctx): Promise<MediaObject[]> {
+    const { data } = await axios.get<OLResposta>("https://openlibrary.org/search.json", {
+      params: { q: consulta, limit: 10 },
       timeout: 10_000,
     });
 
     return (data.docs ?? []).map((doc) => {
-      const ia = pickArchiveId(doc);
+      const ia = pegarIdArchive(doc);
       const downloadUrl = ia ? `https://archive.org/download/${ia}/${ia}.pdf` : undefined;
 
       const item: MediaObject = {
@@ -58,12 +58,12 @@ const recipe: Recipe = {
         title: doc.title,
         artist: doc.author_name?.join(", "),
         type: "book",
-        thumbnail: coverUrl(doc.cover_i),
+        thumbnail: urlCapa(doc.cover_i),
         downloadUrl,
         description: [
-          doc.first_publish_year ? `First published: ${doc.first_publish_year}` : null,
-          doc.edition_count ? `${doc.edition_count} edition(s)` : null,
-          doc.subject?.length ? `Subjects: ${doc.subject.slice(0, 5).join(", ")}` : null,
+          doc.first_publish_year ? `Publicado em ${doc.first_publish_year}` : null,
+          doc.edition_count ? `${doc.edition_count} edição(ões)` : null,
+          doc.subject?.length ? `Assuntos: ${doc.subject.slice(0, 5).join(", ")}` : null,
         ]
           .filter(Boolean)
           .join(" · ") || undefined,
@@ -78,8 +78,9 @@ const recipe: Recipe = {
   },
 
   /**
-   * Resolve a download URL lazily if the search response didn't carry an IA id.
-   * Walks the work's editions looking for one hosted on archive.org.
+   * Resolve uma URL de download de forma preguiçosa caso a busca não
+   * tenha trazido um IA id. Percorre as edições do work em busca de
+   * uma hospedada no archive.org.
    */
   async resolveDownload(item) {
     if (item.downloadUrl) return item.downloadUrl;
@@ -91,13 +92,13 @@ const recipe: Recipe = {
         `https://openlibrary.org${workKey}/editions.json`,
         { params: { limit: 25 }, timeout: 10_000 },
       );
-      const withIa = data.entries?.find((e) => !!e.ocaid);
-      if (!withIa?.ocaid) return null;
-      return `https://archive.org/download/${withIa.ocaid}/${withIa.ocaid}.pdf`;
+      const comIa = data.entries?.find((e) => !!e.ocaid);
+      if (!comIa?.ocaid) return null;
+      return `https://archive.org/download/${comIa.ocaid}/${comIa.ocaid}.pdf`;
     } catch {
       return null;
     }
   },
 };
 
-export default recipe;
+export default receita;

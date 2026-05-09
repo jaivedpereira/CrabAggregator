@@ -1,7 +1,7 @@
 {
   "name": "crabaggregator",
-  "version": "0.1.0",
-  "description": "Universal, modular media aggregator CLI — music, books, manga and videos via pluggable Recipes.",
+  "version": "0.2.0",
+  "description": "Agregador de mídias modular e universal para o terminal — música, livros, mangás e vídeos via Receitas plugáveis.",
   "type": "module",
   "bin": {
     "crab": "./dist/index.js"
@@ -15,12 +15,13 @@
   },
   "keywords": [
     "cli",
-    "media",
-    "aggregator",
+    "midia",
+    "agregador",
     "termux",
     "mpv",
     "yt-dlp",
-    "plugins"
+    "plugins",
+    "portugues"
   ],
   "author": "",
   "license": "MIT",

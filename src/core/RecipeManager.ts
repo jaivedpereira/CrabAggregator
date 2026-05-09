@@ -4,52 +4,56 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Recipe } from "../types/index.js";
 
 /**
- * RecipeManager — auto-discovers Recipe plugins from /src/recipes (dev)
- * or /dist/recipes (prod). Every file that default-exports a valid Recipe
- * becomes a search source.
+ * RecipeManager — descobre automaticamente plugins de Receita a partir
+ * da pasta /src/recipes (em desenvolvimento) ou /dist/recipes (em produção).
+ * Todo arquivo que exporta por default uma Receita válida vira uma fonte
+ * de busca imediatamente.
  */
 export class RecipeManager {
   private recipes: Recipe[] = [];
 
-  /** Returns the absolute path of the recipes directory, adjacent to core/. */
-  private getRecipesDir(): string {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    // core/ and recipes/ are siblings in both src and dist.
-    return path.resolve(here, "..", "recipes");
+  /** Caminho absoluto da pasta de receitas, adjacente a /core. */
+  private pastaReceitas(): string {
+    const aqui = path.dirname(fileURLToPath(import.meta.url));
+    // core/ e recipes/ são irmãs tanto em src/ quanto em dist/.
+    return path.resolve(aqui, "..", "recipes");
   }
 
-  async load(): Promise<Recipe[]> {
-    const dir = this.getRecipesDir();
+  async carregar(): Promise<Recipe[]> {
+    const pasta = this.pastaReceitas();
     this.recipes = [];
 
-    let entries: string[];
+    let entradas: string[];
     try {
-      entries = await fs.readdir(dir);
+      entradas = await fs.readdir(pasta);
     } catch {
       return this.recipes;
     }
 
-    for (const entry of entries) {
-      if (!/\.(ts|js|mjs)$/.test(entry)) continue;
-      if (entry.endsWith(".d.ts")) continue;
+    for (const entrada of entradas) {
+      if (!/\.(ts|js|mjs)$/.test(entrada)) continue;
+      if (entrada.endsWith(".d.ts")) continue;
 
-      const full = path.join(dir, entry);
+      const completo = path.join(pasta, entrada);
       try {
-        const mod = await import(pathToFileURL(full).href);
-        const candidate = (mod.default ?? mod.recipe) as Recipe | undefined;
-        if (this.isValid(candidate)) {
-          this.recipes.push(candidate);
+        const mod = await import(pathToFileURL(completo).href);
+        const candidato = (mod.default ?? mod.recipe) as Recipe | undefined;
+        if (this.ehValida(candidato)) {
+          this.recipes.push(candidato);
         }
       } catch (err) {
-        // A broken recipe must not crash the loader — just surface it.
-        console.error(`[RecipeManager] Failed to load "${entry}":`, (err as Error).message);
+        // Uma receita quebrada não pode derrubar o loader — só reportamos.
+        console.error(
+          `[RecipeManager] Falha ao carregar "${entrada}":`,
+          (err as Error).message,
+        );
       }
     }
 
     return this.recipes;
   }
 
-  private isValid(r: unknown): r is Recipe {
+  private ehValida(r: unknown): r is Recipe {
     if (!r || typeof r !== "object") return false;
     const x = r as Partial<Recipe>;
     return (
@@ -67,7 +71,17 @@ export class RecipeManager {
     return this.recipes.filter((r) => r.enabled !== false);
   }
 
-  byName(name: string): Recipe | undefined {
-    return this.recipes.find((r) => r.name === name);
+  porNome(nome: string): Recipe | undefined {
+    return this.recipes.find((r) => r.name === nome);
+  }
+
+  // Alias mantido para compatibilidade com código em inglês.
+  byName(nome: string): Recipe | undefined {
+    return this.porNome(nome);
+  }
+
+  // Alias do método principal em inglês (não quebra quem já chamava `.load()`).
+  load(): Promise<Recipe[]> {
+    return this.carregar();
   }
 }

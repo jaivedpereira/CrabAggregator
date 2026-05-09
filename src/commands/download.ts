@@ -1,36 +1,55 @@
 import { DownloadManager } from "../core/DownloadManager.js";
-import { loadConfig } from "../core/ConfigStore.js";
-import { banner, errorBox, successBox, tag } from "../utils/ui.js";
+import { carregarConfig } from "../core/ConfigStore.js";
+import {
+  logo,
+  faixa,
+  etiqueta,
+  caixaErro,
+  caixaSucesso,
+  barraProgresso,
+  imprimirProgresso,
+  finalizarLinhaProgresso,
+} from "../utils/ui.js";
 import type { MediaObject } from "../types/index.js";
 import chalk from "chalk";
 
-/** `crab download <url>` — queue a single URL for download. */
-export async function runDownload(url: string, opts: { type?: MediaObject["type"]; name?: string } = {}): Promise<void> {
-  console.log(banner("CrabAggregator · Download"));
-  console.log(`${tag("url", "muted")} ${chalk.cyan(url)}`);
+/** `crab baixar <url>` — enfileira uma URL direta para download. */
+export async function executarDownload(
+  url: string,
+  opts: { tipo?: MediaObject["type"]; nome?: string } = {},
+): Promise<void> {
+  console.log(logo());
+  console.log("\n" + faixa("Download"));
+  console.log(`${etiqueta("url", "discreto")} ${chalk.cyan(url)}`);
 
-  const config = await loadConfig();
+  const config = await carregarConfig();
   const dl = new DownloadManager(config, (prog) => {
-    if (prog.percent != null) {
-      process.stdout.write(`\r${tag("downloading")} ${prog.percent}%   `);
+    if (prog.percentual != null) {
+      imprimirProgresso(
+        barraProgresso(prog.percentual, 30, {
+          recebido: prog.bytesRecebidos,
+          total: prog.bytesTotais,
+          rotulo: opts.nome ?? "download",
+        }),
+      );
     }
   });
 
   const item: MediaObject = {
-    id: opts.name ?? url,
-    title: opts.name ?? "download",
-    type: opts.type ?? "other",
+    id: opts.nome ?? url,
+    title: opts.nome ?? "download",
+    type: opts.tipo ?? "other",
     downloadUrl: url,
   };
-  dl.enqueue({ item });
+  dl.enfileirar({ item });
 
   try {
-    const [dest] = await dl.run();
-    process.stdout.write("\n");
-    console.log(successBox(`Saved to ${dest ?? config.downloadPath}`));
+    const [destino] = await dl.executar();
+    finalizarLinhaProgresso();
+    console.log(caixaSucesso(`Salvo em ${destino ?? config.downloadPath}`));
   } catch (err) {
-    process.stdout.write("\n");
-    console.log(errorBox((err as Error).message));
+    finalizarLinhaProgresso();
+    console.log(caixaErro((err as Error).message));
     process.exitCode = 1;
   }
 }
